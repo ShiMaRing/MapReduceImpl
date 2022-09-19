@@ -2,7 +2,6 @@
 
 ## 云计算架构与技术课堂作业
 
-参考论文 `https://static.googleusercontent.com/media/research.google.com/zh-CN//archive/mapreduce-osdi04.pdf`
 
 使用 `Golang` 实现的简单 `MapReduce` 框架 ，使用`rpc`进行通信 
 
