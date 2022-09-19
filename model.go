@@ -12,7 +12,7 @@ const (
 
 // Task 等待master分配任务
 type Task struct {
-	taskType  string              //任务类型
+	taskType  NodeType            //任务类型
 	fileName  string              //分配给mapper的文件名
 	R         int                 //分配给mapper的R的大小
 	filePaths map[string][]string //key 为worker地址，v为文件名列表
@@ -38,6 +38,7 @@ type WorkerInfo struct {
 type MapResult struct {
 	mapperId int
 	state    state
+	errType  string
 	res      map[int][]string
 }
 

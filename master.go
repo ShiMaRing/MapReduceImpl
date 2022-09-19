@@ -87,7 +87,9 @@ func (master *Master) Start() error {
 }
 
 // StartSchedule 十秒钟调度一次
-func (master *Master) StartSchedule() {
+func (master *Master) StartSchedule() []string {
+	group := sync.WaitGroup{}
+	group.Add(1)
 	go func() {
 		tick := time.Tick(10 * time.Second)
 		for !master.isFinished() {
@@ -97,14 +99,17 @@ func (master *Master) StartSchedule() {
 			}
 		}
 
-		//结束了提交所有的信息
-		master.Finish()
+		group.Done()
 	}()
+	group.Wait()
+	return master.getResult()
 }
 
-// Finish 结束调用，通知所有client结束
-func (master *Master) Finish() {
-
+func (master *Master) getResult() (res []string) {
+	for _, v := range master.reduceResult {
+		res = append(res, v...)
+	}
+	return
 }
 
 // MapperSubmit map提交结果
@@ -116,6 +121,7 @@ func (master *Master) MapperSubmit(result *MapResult, reply *bool) error {
 	id := WorkerID(result.mapperId)
 
 	master.mu.Lock()
+	defer master.mu.Unlock()
 	if _, ok := master.tasksMap[id]; !ok {
 		*reply = false
 		return fmt.Errorf("the worker is not register")
@@ -127,23 +133,20 @@ func (master *Master) MapperSubmit(result *MapResult, reply *bool) error {
 		n.failCnt++
 		*reply = false
 		return nil
-	} else {
-		master.mapCnt++
-		//map任务结束，但是还不能够关闭channel，因为一旦节点失效，数据将无法获取，在reduce结束才可以关闭chanel
-		if master.mapCnt == master.M {
-			master.mapFinish = true
-			close(master.mapperTaskChan)
-		}
 	}
 	master.mappers = append(master.mappers, n)
-	master.mu.Unlock()
+
 	master.resultLock.Lock()
 	defer master.resultLock.Unlock()
 	//添加到结果中去
 	for reduceID := range master.mapResultMap[id] {
 		master.mapResultMap[id][reduceID] = append(master.mapResultMap[id][reduceID], result.res[int(reduceID)]...)
 	}
-
+	master.mapCnt++
+	if master.mapCnt == master.M {
+		master.mapFinish = true
+		close(master.mapperTaskChan)
+	}
 	*reply = true
 	return nil
 }
@@ -157,6 +160,8 @@ func (master *Master) ReduceSubmit(result *ReduceResult, reply *bool) error {
 	id := WorkerID(result.reducerId)
 
 	master.mu.Lock()
+	defer master.mu.Unlock()
+
 	if _, ok := master.tasksMap[id]; !ok {
 		*reply = false
 		return fmt.Errorf("the worker is not register")
@@ -168,20 +173,21 @@ func (master *Master) ReduceSubmit(result *ReduceResult, reply *bool) error {
 		n.failCnt++
 		*reply = false
 		return nil
-	} else {
-		master.reduceCnt++
-		if master.reduceCnt == master.R {
-			master.reduceFinish = true
-			close(master.reduceTaskChan)
-		}
 	}
+
 	master.mappers = append(master.reducers, n)
-	master.mu.Unlock()
 
 	master.resultLock.Lock()
 	defer master.resultLock.Unlock()
 	//添加结果
 	master.reduceResult[id] = append(master.reduceResult[id], result.res...)
+	master.reduceCnt++
+
+	if master.reduceCnt == master.R {
+		master.reduceFinish = true
+		close(master.reduceTaskChan)
+	}
+
 	*reply = true
 	return nil
 }
@@ -294,7 +300,7 @@ func (master *Master) mapSchedule(k string, n *node) {
 		return
 	}
 	task := &Task{
-		taskType: "map",
+		taskType: MAPPER,
 		fileName: k,
 		R:        master.R,
 	}
@@ -326,7 +332,7 @@ func (master *Master) reduceSchedule(k int, n *node) {
 	}
 	//此处需要拿到所有的workerId以及其对应的文件名
 	task := &Task{
-		taskType:  "reduce",
+		taskType:  REDUCER,
 		filePaths: map[string][]string{},
 		R:         master.R,
 	}

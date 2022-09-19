@@ -1,21 +1,19 @@
 package main
 
 import (
+	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/rpc"
+	"os"
 )
 
-// MapperInterface 需要客户定制的方法,读入信息之后进行映射
-type MapperInterface func(node *Worker, reader io.Reader) *MapResult
+// MapperInterface 传入任务信息以及worker实例，用户需要返回每一个R对应的文件列表
+type MapperInterface func(node *Worker, task *Task) (map[int][]string, error)
 
-// ReduceInterface 需要客户定制的方法,进行reduce操作，返回结果以及信息
-type ReduceInterface func(node *Worker, reader io.Reader) *ReduceResult
-
-// HandleTaskInterface 需要客户定制的方法,如何处理master发布的任务
-type HandleTaskInterface func(node *Worker, task *Task, accept *bool) error
+// ReduceInterface 传入任务信息以及worker实例，用户需要返回生成的文件列表
+type ReduceInterface func(node *Worker, task *Task) ([]string, error)
 
 // WorkerInterface 基础节点需要实现的方法
 type WorkerInterface interface {
@@ -35,7 +33,6 @@ type Worker struct {
 	nodeType                  NodeType //节点的类型
 	mapFunc                   MapperInterface
 	reduceFunc                ReduceInterface
-	handleTaskFunc            HandleTaskInterface
 }
 
 //暂未实现
@@ -44,8 +41,41 @@ func (worker *Worker) pong() error {
 	panic("implement me")
 }
 
+// HandleTask 是否接受任务
 func (worker *Worker) HandleTask(task *Task, accept *bool) error {
-	return worker.handleTaskFunc(worker, task, accept)
+	if task.taskType != worker.nodeType {
+		*accept = false
+		return fmt.Errorf("unreasonable assignment of tasks ")
+	}
+	if task.taskType == MAPPER {
+		if task.R == 0 {
+			*accept = false
+			return fmt.Errorf("R is 0 ")
+		}
+
+		if _, err := os.Stat(task.fileName); errors.Is(err, os.ErrNotExist) {
+			*accept = false
+			return fmt.Errorf("not found file ")
+		}
+
+		go func() {
+			err := worker.info(worker.mapFunc(worker, task))
+			log.Println(err)
+		}()
+
+	} else {
+		if task.filePaths == nil {
+			*accept = false
+			return fmt.Errorf("filePaths is nil ")
+		}
+		go func() {
+			err := worker.info(worker.reduceFunc(worker, task))
+			log.Println(err)
+		}()
+	}
+
+	*accept = true
+	return nil
 }
 
 func (worker *Worker) Register() error {
@@ -68,21 +98,38 @@ func (worker *Worker) buildWorkInfo() *WorkerInfo {
 	}
 }
 
-func (worker *Worker) Info(msg interface{}) (err error) {
+func (worker *Worker) info(msg interface{}, errMsg error) (err error) {
 	success := false
 	if worker.nodeType == MAPPER {
-		result, ok := msg.(*MapResult)
+		result, ok := msg.(map[int][]string)
 		if !ok {
 			return fmt.Errorf("wrong data format when mapper submit")
 		}
-		err = worker.client.Call("Master.MapperSubmit", result, &success)
+		mRes := &MapResult{
+			mapperId: worker.id,
+			res:      result,
+		}
+		if errMsg != nil {
+			mRes.state = FAILED
+			mRes.errType = errMsg.Error()
+		}
+		err = worker.client.Call("Master.MapperSubmit", mRes, &success)
 	} else {
-		result, ok := msg.(*MapResult)
+		result, ok := msg.([]string)
 		if !ok {
 			return fmt.Errorf("wrong data format when reducer submit")
 		}
-		err = worker.client.Call("Master.MapperSubmit", result, &success)
+		RRes := &ReduceResult{
+			reducerId: worker.id,
+			res:       result,
+		}
+		if errMsg != nil {
+			RRes.state = FAILED
+			RRes.errType = errMsg.Error()
+		}
+		err = worker.client.Call("Master.ReduceSubmit", RRes, &success)
 	}
+
 	if err == nil && success {
 		return nil
 	}
@@ -129,13 +176,6 @@ func (worker *Worker) WithReduceFunc(f ReduceInterface) error {
 	return nil
 }
 
-func (worker *Worker) WithHandleTaskFunc(f HandleTaskInterface) error {
-	if f == nil {
-		return fmt.Errorf("HandleTaskInterface is nil")
-	}
-	worker.handleTaskFunc = f
-	return nil
-}
 func (worker *Worker) Start() error {
 	name := ""
 	if worker.nodeType == MAPPER {
