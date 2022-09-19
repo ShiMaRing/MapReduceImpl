@@ -12,6 +12,7 @@ import (
 
 type Status int
 
+const INTERVAL int = 1
 const (
 	IDLE Status = iota
 	RUNNING
@@ -78,11 +79,14 @@ func (master *Master) Start() error {
 	if err != nil {
 		log.Fatal("ListenTCP error:", err)
 	}
-	conn, err := listener.Accept()
-	if err != nil {
-		log.Fatal("Accept error:", err)
+
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			log.Fatal("Accept error:", err)
+		}
+		go rpc.ServeConn(conn)
 	}
-	rpc.ServeConn(conn)
 	return err
 }
 
@@ -91,14 +95,14 @@ func (master *Master) StartSchedule() []string {
 	group := sync.WaitGroup{}
 	group.Add(1)
 	go func() {
-		tick := time.Tick(10 * time.Second)
+		master.schedule()
+		tick := time.Tick(time.Duration(INTERVAL) * time.Second)
 		for !master.isFinished() {
 			select {
 			case <-tick:
 				master.schedule()
 			}
 		}
-
 		group.Done()
 	}()
 	group.Wait()
@@ -114,39 +118,43 @@ func (master *Master) getResult() (res []string) {
 
 // MapperSubmit map提交结果
 func (master *Master) MapperSubmit(result *MapResult, reply *bool) error {
+
 	if result == nil {
 		*reply = false
 		return fmt.Errorf("result is empty")
 	}
-	id := WorkerID(result.mapperId)
+	id := WorkerID(result.MapperId)
 
 	master.mu.Lock()
 	defer master.mu.Unlock()
+
 	if _, ok := master.tasksMap[id]; !ok {
 		*reply = false
 		return fmt.Errorf("the worker is not register")
 	}
-	delete(master.tasksMap, id) //删除关联
+	delete(master.tasksMap, id)
 	n := master.workers[id]
-	n.status = IDLE
-	if result.state == FAILED {
+	if result.State == FAILED {
 		n.failCnt++
-		*reply = false
-		return nil
 	}
+	n.status = IDLE
 	master.mappers = append(master.mappers, n)
 
 	master.resultLock.Lock()
 	defer master.resultLock.Unlock()
 	//添加到结果中去
-	for reduceID := range master.mapResultMap[id] {
-		master.mapResultMap[id][reduceID] = append(master.mapResultMap[id][reduceID], result.res[int(reduceID)]...)
+	if _, ok := master.mapResultMap[id]; !ok {
+		master.mapResultMap[id] = make(map[ReduceID][]string)
+	}
+	for reduceID := range result.Res {
+		master.mapResultMap[id][ReduceID(reduceID)] = append(master.mapResultMap[id][ReduceID(reduceID)], result.Res[reduceID]...)
 	}
 	master.mapCnt++
 	if master.mapCnt == master.M {
 		master.mapFinish = true
 		close(master.mapperTaskChan)
 	}
+
 	*reply = true
 	return nil
 }
@@ -157,7 +165,7 @@ func (master *Master) ReduceSubmit(result *ReduceResult, reply *bool) error {
 		*reply = false
 		return fmt.Errorf("result is empty")
 	}
-	id := WorkerID(result.reducerId)
+	id := WorkerID(result.ReducerId)
 
 	master.mu.Lock()
 	defer master.mu.Unlock()
@@ -166,10 +174,12 @@ func (master *Master) ReduceSubmit(result *ReduceResult, reply *bool) error {
 		*reply = false
 		return fmt.Errorf("the worker is not register")
 	}
+
 	delete(master.tasksMap, id) //删除关联
+
 	n := master.workers[id]
 	n.status = IDLE
-	if result.state == FAILED {
+	if result.State == FAILED {
 		n.failCnt++
 		*reply = false
 		return nil
@@ -180,7 +190,7 @@ func (master *Master) ReduceSubmit(result *ReduceResult, reply *bool) error {
 	master.resultLock.Lock()
 	defer master.resultLock.Unlock()
 	//添加结果
-	master.reduceResult[id] = append(master.reduceResult[id], result.res...)
+	master.reduceResult[id] = append(master.reduceResult[id], result.Res...)
 	master.reduceCnt++
 
 	if master.reduceCnt == master.R {
@@ -192,14 +202,11 @@ func (master *Master) ReduceSubmit(result *ReduceResult, reply *bool) error {
 	return nil
 }
 
-func (master *Master) AddTasks(mapperTasks []string, reduceTasks []int) error {
+func (master *Master) AddTasks(mapperTasks []string) error {
 	master.mu.Lock()
 	defer master.mu.Unlock()
 	if mapperTasks == nil || len(mapperTasks) == 0 {
 		return fmt.Errorf("mapperTasks is empty")
-	}
-	if reduceTasks == nil || len(reduceTasks) == 0 {
-		return fmt.Errorf("reduceTasks is empty")
 	}
 	for _, v := range mapperTasks {
 		if _, ok := master.mapperTaskMap[v]; ok {
@@ -208,7 +215,7 @@ func (master *Master) AddTasks(mapperTasks []string, reduceTasks []int) error {
 		master.mapperTaskMap[v] = struct{}{}
 		master.mapperTaskChan <- v
 	}
-	for _, v := range reduceTasks {
+	for v := 0; v < master.R; v++ {
 		if _, ok := master.reduceTaskMap[v]; ok {
 			continue
 		}
@@ -220,13 +227,14 @@ func (master *Master) AddTasks(mapperTasks []string, reduceTasks []int) error {
 
 // Register RPC远程调用,work将自身注册至master
 func (master *Master) Register(workInfo *WorkerInfo, success *bool) error {
+
 	master.mu.Lock()
 	defer master.mu.Unlock()
 	if workInfo == nil {
 		*success = false
 		return fmt.Errorf("work info can not be nil")
 	}
-	if _, ok := master.workers[WorkerID(workInfo.id)]; ok {
+	if _, ok := master.workers[WorkerID(workInfo.Id)]; ok {
 		*success = false
 		return fmt.Errorf("work already exist")
 	}
@@ -234,16 +242,15 @@ func (master *Master) Register(workInfo *WorkerInfo, success *bool) error {
 		info:   workInfo,
 		status: IDLE,
 	}
-	master.workers[WorkerID(workInfo.id)] = n
+	master.workers[WorkerID(workInfo.Id)] = n
 
-	if workInfo.workerType == MAPPER {
+	if workInfo.WorkerType == MAPPER {
 		master.mappers = append(master.mappers, n)
 		sort.Sort(master.mappers)
-	} else if workInfo.workerType == REDUCER {
+	} else if workInfo.WorkerType == REDUCER {
 		master.reducers = append(master.reducers, n)
 		sort.Sort(master.reducers)
 	}
-
 	*success = true
 	return nil
 }
@@ -258,8 +265,10 @@ func (master *Master) schedule() {
 	//调度mapper
 	if !mapFinished {
 		for k := range master.mapperTaskChan {
+
 			if len(master.mappers) == 0 {
 				//没有可以调度的mapper了
+				master.mapperTaskChan <- k
 				break
 			}
 			n := master.mappers[len(master.mappers)-1]
@@ -268,16 +277,24 @@ func (master *Master) schedule() {
 			if n.status == DEAD {
 				continue
 			}
-			go master.mapSchedule(k, n)
-		}
-	}
 
+			go func(k string, n *node) {
+				//fmt.Println(k, *n.info)
+				master.mapSchedule(k, n)
+			}(k, n)
+
+		}
+		return
+	}
+	fmt.Println("hreh")
 	//调度reducer
 	if !reduceFinished {
+
 		for k := range master.reduceTaskChan {
 
 			if len(master.reducers) == 0 {
 				//没有可以调度的mapper了
+				master.reduceTaskChan <- k
 				break
 			}
 			n := master.reducers[len(master.reducers)-1]
@@ -294,24 +311,34 @@ func (master *Master) schedule() {
 
 func (master *Master) mapSchedule(k string, n *node) {
 
-	client, err := rpc.Dial("tcp", fmt.Sprintf("%s:%s", n.info.address, n.info.port))
+	client, err := rpc.Dial("tcp", fmt.Sprintf("%s:%s", n.info.Address, n.info.Port))
+
 	if err != nil {
 		master.mapperTaskChan <- k
+
+		master.mu.Lock()
+		n.failCnt++
+		master.mappers = append(master.mappers, n)
+		master.mu.Unlock()
+
 		return
 	}
+
 	task := &Task{
-		taskType: MAPPER,
-		fileName: k,
+		TaskType: MAPPER,
+		FileName: k,
 		R:        master.R,
 	}
 	var isSuccess bool
-	err = client.Call("Mapper.HandleTask", task, &isSuccess)
+
+	name := fmt.Sprintf("Mapper-%d", n.info.Id)
+	err = client.Call(name+".HandleTask", task, &isSuccess)
+
 	master.mu.Lock()
-	defer master.mu.Unlock()
 	if err == nil && isSuccess {
 		n.failCnt = 0
 		n.status = RUNNING
-		master.tasksMap[WorkerID(n.info.id)] = task
+		master.tasksMap[WorkerID(n.info.Id)] = task
 	} else {
 		//重新放回去,并记录
 		n.failCnt++
@@ -320,37 +347,43 @@ func (master *Master) mapSchedule(k string, n *node) {
 		}
 		master.mappers = append(master.mappers, n)
 	}
+	master.mu.Unlock()
+
 }
 
-//分配k id
+//分配k Id
 func (master *Master) reduceSchedule(k int, n *node) {
-
-	client, err := rpc.Dial("tcp", fmt.Sprintf("%s:%s", n.info.address, n.info.port))
+	//fmt.Println(*n.info, "k:", k)
+	client, err := rpc.Dial("tcp", fmt.Sprintf("%s:%s", n.info.Address, n.info.Port))
 	if err != nil {
 		master.reduceTaskChan <- k
 		return
 	}
 	//此处需要拿到所有的workerId以及其对应的文件名
 	task := &Task{
-		taskType:  REDUCER,
-		filePaths: map[string][]string{},
+		TaskType:  REDUCER,
+		FilePaths: map[string][]string{},
 		R:         master.R,
+		Cur:       k,
 	}
 	master.mu.Lock()
+
 	for id := range master.mapResultMap {
-		mapper := master.mappers[id]
-		address := fmt.Sprintf("%s:%s", mapper.info.address, mapper.info.port)
-		task.filePaths[address] = master.mapResultMap[id][ReduceID(k)]
+		mapper := master.workers[id]
+		address := fmt.Sprintf("%s:%s", mapper.info.Address, mapper.info.Port)
+		task.FilePaths[address] = master.mapResultMap[id][ReduceID(k)]
 	}
+
 	master.mu.Unlock()
 	var isSuccess bool
-	err = client.Call("Reducer.HandleTask", task, &isSuccess)
+	name := fmt.Sprintf("Reducer-%d", n.info.Id)
+	err = client.Call(name+".HandleTask", task, &isSuccess)
 
 	master.mu.Lock()
 	defer master.mu.Unlock()
 	if err == nil && isSuccess {
 		n.failCnt = 0
-		master.tasksMap[WorkerID(n.info.id)] = task
+		master.tasksMap[WorkerID(n.info.Id)] = task
 	} else {
 		//重新放回去,并记录
 		n.failCnt++
@@ -376,7 +409,7 @@ func (n nodes) Len() int {
 
 // Less 按照score大小排序
 func (n nodes) Less(i, j int) bool {
-	return n[i].info.score >= n[j].info.score
+	return n[i].info.Score >= n[j].info.Score
 }
 
 func (n nodes) Swap(i, j int) {

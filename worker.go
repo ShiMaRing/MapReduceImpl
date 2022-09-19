@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/rpc"
 	"os"
+	"strconv"
 )
 
 // MapperInterface 传入任务信息以及worker实例，用户需要返回每一个R对应的文件列表
@@ -17,10 +18,10 @@ type ReduceInterface func(node *Worker, task *Task) ([]string, error)
 
 // WorkerInterface 基础节点需要实现的方法
 type WorkerInterface interface {
-	HandleTask(task *Task, accept *bool) error //处理master发布的任务
-	Register() error                           //将自身注册至master
-	pong() error                               //接受master的ping表示自己的状态
-	Info(msg interface{}) error                //通知master最终的执行信息
+	HandleTask(task *Task, accept *bool) error      //处理master发布的任务
+	Register() error                                //将自身注册至master
+	pong() error                                    //接受master的ping表示自己的状态
+	info(msg interface{}, errMsg error) (err error) //通知master最终的执行信息
 }
 
 // Worker 基础节点，提供mapreduce框架功能
@@ -43,17 +44,18 @@ func (worker *Worker) pong() error {
 
 // HandleTask 是否接受任务
 func (worker *Worker) HandleTask(task *Task, accept *bool) error {
-	if task.taskType != worker.nodeType {
+
+	if task.TaskType != worker.nodeType {
 		*accept = false
 		return fmt.Errorf("unreasonable assignment of tasks ")
 	}
-	if task.taskType == MAPPER {
+	if task.TaskType == MAPPER {
 		if task.R == 0 {
 			*accept = false
 			return fmt.Errorf("R is 0 ")
 		}
 
-		if _, err := os.Stat(task.fileName); errors.Is(err, os.ErrNotExist) {
+		if _, err := os.Stat(task.FileName); errors.Is(err, os.ErrNotExist) {
 			*accept = false
 			return fmt.Errorf("not found file ")
 		}
@@ -64,9 +66,9 @@ func (worker *Worker) HandleTask(task *Task, accept *bool) error {
 		}()
 
 	} else {
-		if task.filePaths == nil {
+		if task.FilePaths == nil {
 			*accept = false
-			return fmt.Errorf("filePaths is nil ")
+			return fmt.Errorf("FilePaths is nil ")
 		}
 		go func() {
 			err := worker.info(worker.reduceFunc(worker, task))
@@ -90,28 +92,30 @@ func (worker *Worker) Register() error {
 
 func (worker *Worker) buildWorkInfo() *WorkerInfo {
 	return &WorkerInfo{
-		id:         worker.id,
-		address:    worker.address,
-		port:       worker.port,
-		workerType: worker.nodeType,
-		score:      worker.score,
+		Id:         worker.id,
+		Address:    worker.address,
+		Port:       worker.port,
+		WorkerType: worker.nodeType,
+		Score:      worker.score,
 	}
 }
 
 func (worker *Worker) info(msg interface{}, errMsg error) (err error) {
 	success := false
+	//fmt.Println("worker", *worker)
 	if worker.nodeType == MAPPER {
 		result, ok := msg.(map[int][]string)
 		if !ok {
 			return fmt.Errorf("wrong data format when mapper submit")
 		}
+
 		mRes := &MapResult{
-			mapperId: worker.id,
-			res:      result,
+			MapperId: worker.id,
+			Res:      result,
 		}
 		if errMsg != nil {
-			mRes.state = FAILED
-			mRes.errType = errMsg.Error()
+			mRes.State = FAILED
+			mRes.ErrType = errMsg.Error()
 		}
 		err = worker.client.Call("Master.MapperSubmit", mRes, &success)
 	} else {
@@ -120,12 +124,12 @@ func (worker *Worker) info(msg interface{}, errMsg error) (err error) {
 			return fmt.Errorf("wrong data format when reducer submit")
 		}
 		RRes := &ReduceResult{
-			reducerId: worker.id,
-			res:       result,
+			ReducerId: worker.id,
+			Res:       result,
 		}
 		if errMsg != nil {
-			RRes.state = FAILED
-			RRes.errType = errMsg.Error()
+			RRes.State = FAILED
+			RRes.ErrType = errMsg.Error()
 		}
 		err = worker.client.Call("Master.ReduceSubmit", RRes, &success)
 	}
@@ -150,48 +154,43 @@ func (worker *Worker) WithMasterConfig(masterAddr, masterPort string) error {
 	worker.client = client
 	return nil
 }
+
 func (worker *Worker) WithScore(score uint32) {
 	worker.score = score
 }
 
-func (worker *Worker) WithMapperFunc(f MapperInterface) error {
-	if worker.nodeType != MAPPER {
-		return fmt.Errorf("Worker mismatch ")
-	}
-	if f == nil {
-		return fmt.Errorf("MapperInterface is nil")
-	}
+func (worker *Worker) WithMapperFunc(f MapperInterface) *Worker {
 	worker.mapFunc = f
-	return nil
+	return worker
 }
 
-func (worker *Worker) WithReduceFunc(f ReduceInterface) error {
-	if worker.nodeType != REDUCER {
-		return fmt.Errorf("Worker mismatch ")
-	}
-	if f == nil {
-		return fmt.Errorf("ReduceInterface is nil")
-	}
+func (worker *Worker) WithReduceFunc(f ReduceInterface) *Worker {
 	worker.reduceFunc = f
-	return nil
+	return worker
 }
 
 func (worker *Worker) Start() error {
+
 	name := ""
 	if worker.nodeType == MAPPER {
-		name = "Mapper"
+		name = "Mapper-" + strconv.Itoa(worker.id)
 	} else {
-		name = "Reducer"
+		name = "Reducer-" + strconv.Itoa(worker.id)
 	}
 	err := rpc.RegisterName(name, worker)
+
 	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%s", worker.address, worker.port))
 	if err != nil {
 		log.Fatal("ListenTCP error:", err)
 	}
-	conn, err := listener.Accept()
-	if err != nil {
-		log.Fatal("Accept error:", err)
+
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			log.Fatal("Accept error:", err)
+		}
+		go rpc.ServeConn(conn)
 	}
-	rpc.ServeConn(conn)
+
 	return err
 }
