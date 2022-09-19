@@ -1,7 +1,5 @@
 # MapReduceImpl
 
-## 云计算架构与技术课堂作业
-
 
 使用 `Golang` 实现的简单 `MapReduce` 框架 ，使用`rpc`进行通信 
 
