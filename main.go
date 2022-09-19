@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"log"
 	"strconv"
 )
 
@@ -27,7 +27,7 @@ func main() {
 		go func() {
 			err = newNode.Start()
 			if err != nil {
-				fmt.Println(err)
+				log.Println(err)
 			}
 		}()
 	}
@@ -40,17 +40,17 @@ func main() {
 		newNode.WithReduceFunc(TestReduce) //设置reduce函数
 		err := newNode.Register()          //注册到master
 		if err != nil {
-			fmt.Println(err)
+			log.Println(err)
 		}
 		go func() {
 			err = newNode.Start()
 			if err != nil {
-				fmt.Println(err)
+				log.Println(err)
 			}
 		}()
 	}
 
 	//启动调度master并接收结果
 	result := master.StartSchedule()
-	fmt.Println(result)
+	log.Println("the output file is : ", result)
 }

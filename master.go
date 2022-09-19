@@ -286,7 +286,6 @@ func (master *Master) schedule() {
 		}
 		return
 	}
-	fmt.Println("hreh")
 	//调度reducer
 	if !reduceFinished {
 
