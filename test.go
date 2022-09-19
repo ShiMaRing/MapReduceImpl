@@ -7,9 +7,10 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"xgs/mp"
 )
 
-func TestMap(node *Worker, task *Task) (res map[int][]string, err error) {
+func TestMap(node *mp.Worker, task *mp.Task) (res map[int][]string, err error) {
 	name := task.FileName //获取目标文件名
 	m := make(map[string]int)
 	file, err := os.Open(name)
@@ -25,7 +26,7 @@ func TestMap(node *Worker, task *Task) (res map[int][]string, err error) {
 
 	res = make(map[int][]string)
 	for i := 0; i < task.R; i++ {
-		fileName := getName("tmp", "mapper", node.id, i)
+		fileName := getName("tmp", "mapper", node.Id, i)
 		openFile, _ := os.OpenFile(fileName, os.O_CREATE|os.O_WRONLY, 0777)
 		writer := bufio.NewWriter(openFile)
 		for s := range m {
@@ -40,9 +41,9 @@ func TestMap(node *Worker, task *Task) (res map[int][]string, err error) {
 	return
 }
 
-func TestReduce(node *Worker, task *Task) ([]string, error) {
+func TestReduce(node *mp.Worker, task *mp.Task) ([]string, error) {
 
-	name := getName("output", "reduce", node.id, task.Cur)
+	name := getName("output", "reduce", node.Id, task.Cur)
 
 	openFile, _ := os.OpenFile(name, os.O_CREATE|os.O_WRONLY, 0777)
 	writer := bufio.NewWriter(openFile)

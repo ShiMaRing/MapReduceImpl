@@ -1,4 +1,4 @@
-package main
+package mp
 
 type state string
 type NodeType string

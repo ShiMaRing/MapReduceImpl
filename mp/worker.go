@@ -1,4 +1,4 @@
-package main
+package mp
 
 import (
 	"errors"
@@ -26,7 +26,7 @@ type WorkerInterface interface {
 
 // Worker 基础节点，提供mapreduce框架功能
 type Worker struct {
-	id                        int
+	Id                        int
 	masterAddress, masterPort string //master的地址
 	score                     uint32 //性能越高，越会被优先调度
 	client                    *rpc.Client
@@ -92,7 +92,7 @@ func (worker *Worker) Register() error {
 
 func (worker *Worker) buildWorkInfo() *WorkerInfo {
 	return &WorkerInfo{
-		Id:         worker.id,
+		Id:         worker.Id,
 		Address:    worker.address,
 		Port:       worker.port,
 		WorkerType: worker.nodeType,
@@ -110,7 +110,7 @@ func (worker *Worker) info(msg interface{}, errMsg error) (err error) {
 		}
 
 		mRes := &MapResult{
-			MapperId: worker.id,
+			MapperId: worker.Id,
 			Res:      result,
 		}
 		if errMsg != nil {
@@ -124,7 +124,7 @@ func (worker *Worker) info(msg interface{}, errMsg error) (err error) {
 			return fmt.Errorf("wrong data format when reducer submit")
 		}
 		RRes := &ReduceResult{
-			ReducerId: worker.id,
+			ReducerId: worker.Id,
 			Res:       result,
 		}
 		if errMsg != nil {
@@ -141,7 +141,7 @@ func (worker *Worker) info(msg interface{}, errMsg error) (err error) {
 }
 
 func NewNode(address string, port string, nodeType NodeType, id int) *Worker {
-	return &Worker{address: address, port: port, nodeType: nodeType, id: id}
+	return &Worker{address: address, port: port, nodeType: nodeType, Id: id}
 }
 
 func (worker *Worker) WithMasterConfig(masterAddr, masterPort string) error {
@@ -173,9 +173,9 @@ func (worker *Worker) Start() error {
 
 	name := ""
 	if worker.nodeType == MAPPER {
-		name = "Mapper-" + strconv.Itoa(worker.id)
+		name = "Mapper-" + strconv.Itoa(worker.Id)
 	} else {
-		name = "Reducer-" + strconv.Itoa(worker.id)
+		name = "Reducer-" + strconv.Itoa(worker.Id)
 	}
 	err := rpc.RegisterName(name, worker)
 

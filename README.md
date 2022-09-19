@@ -12,13 +12,20 @@
 ### 代码结构
 
 ```
-master.go    //master节点的主要实现
+mp\master.go    //master节点的主要实现
 
-worker.go    //worker节点的主要实现
+mp\worker.go    //worker节点的主要实现
 
-model.go     //公用依赖
+mp\model.go     //公用依赖
 
-source       //样例数据     
+source          //样例数据
+
+test.go         //字符统计的Map与Reduce函数实现
+
+main.go          //主函数  
+
+kmeans.go            //基于mapreduce的kmeans实现
+
 ```
 
 ### 使用案例（字符数量统计的代码实现）
