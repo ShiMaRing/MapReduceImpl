@@ -1,3 +1,3 @@
 # MapReduceImpl
 
-### A MapReduce demo implemented in GO
+### A MapReduce demo implemented in GO （still in devloping）
