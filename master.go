@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"log"
+	"net"
 	"net/rpc"
 	"sort"
 	"sync"
@@ -41,6 +43,11 @@ type Master struct {
 	resultLock              sync.Mutex                         //互斥锁，保护result信息
 }
 
+//暂未实现
+func (master *Master) ping() {
+
+}
+
 //是否结束
 func (master *Master) isFinished() bool {
 	master.mu.Lock()
@@ -62,6 +69,21 @@ func NewMaster(m int, r int, address string, port string) *Master {
 	master.mapperTaskChan = make(chan string, m)
 	master.reduceTaskChan = make(chan int, r)
 	return master
+}
+
+// Start 启动rpc服务
+func (master *Master) Start() error {
+	err := rpc.RegisterName("Master", master)
+	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%s", master.Address, master.Port))
+	if err != nil {
+		log.Fatal("ListenTCP error:", err)
+	}
+	conn, err := listener.Accept()
+	if err != nil {
+		log.Fatal("Accept error:", err)
+	}
+	rpc.ServeConn(conn)
+	return err
 }
 
 // StartSchedule 十秒钟调度一次

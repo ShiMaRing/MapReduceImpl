@@ -1,12 +1,13 @@
 package main
 
 type state string
+type NodeType string
 
 const (
-	FINISHED state  = "finish"
-	FAILED   state  = "failed"
-	MAPPER   string = "mapper"
-	REDUCER  string = "reducer"
+	FINISHED state    = "finish"
+	FAILED   state    = "failed"
+	MAPPER   NodeType = "mapper"
+	REDUCER  NodeType = "reducer"
 )
 
 // Task 等待master分配任务
@@ -29,7 +30,7 @@ type WorkerInfo struct {
 	id         int //workerId,标记worker
 	address    string
 	port       string
-	workerType string
+	workerType NodeType
 	score      uint32
 }
 
