@@ -1,17 +1,20 @@
 package main
 
+type state string
+
+const (
+	FINISHED state  = "finish"
+	FAILED   state  = "failed"
+	MAPPER   string = "mapper"
+	REDUCER  string = "reducer"
+)
+
 // Task 等待master分配任务
 type Task struct {
-	tasKId   uint64 //任务id
-	taskType string //任务类型
-	inner    data   //内部数据
-}
-
-type data struct {
-	fileName  string            //分配给mapper的文件名
-	filePaths map[string]string //key 为worker地址，v为文件名
-	reduceId  int               //reduce的任务id，找到相关的文件进行处理
-	mapperId  int               //mapper的任务id，找到相关的文件进行处理
+	taskType  string              //任务类型
+	fileName  string              //分配给mapper的文件名
+	R         int                 //分配给mapper的R的大小
+	filePaths map[string][]string //key 为worker地址，v为文件名列表
 }
 
 // Pair 键值对
@@ -28,4 +31,19 @@ type WorkerInfo struct {
 	port       string
 	workerType string
 	score      uint32
+}
+
+// MapResult  最终执行的结果
+type MapResult struct {
+	mapperId int
+	state    state
+	res      map[int][]string
+}
+
+// ReduceResult   最终执行的结果
+type ReduceResult struct {
+	reducerId int
+	state     state
+	errType   string
+	res       []string //最终的结束文件
 }
