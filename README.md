@@ -9,6 +9,8 @@
 
 用户只需要配置 ` M  R `, 各节点的 ip 与 端口 并实现  `Map` 以及 `Reduce` 方法即可进行使用
 
+由于时间问题未能具体实现`K-Means`算法，在` kmeans.go `文件中给出算法改写思路
+
 ### 代码结构
 
 ```
@@ -24,7 +26,7 @@ test.go         //字符统计的Map与Reduce函数实现
 
 main.go          //主函数  
 
-kmeans.go            //基于mapreduce的kmeans实现
+kmeans.go        //给出算法改写思路
 
 ```
 
